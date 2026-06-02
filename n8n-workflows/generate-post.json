@@ -29,10 +29,6 @@
           ]
         },
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": []
-        },
-        "options": {},
         "jsonBody": "{\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a creative copywriter. Improve the user's post idea and return JSON: {\\\"title\\\": ..., \\\"text\\\": ..., \\\"image_prompt\\\": ...}. Make the image_prompt detailed for AI image generation.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.prompt }}\"\n    }\n  ],\n  \"response_format\": { \"type\": \"json_object\" },\n  \"temperature\": 0.7\n}"
       }
     },

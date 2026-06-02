@@ -1,19 +1,19 @@
 services:
+  # === PostgreSQL (shared: n8n + Postiz) ===
   postgres:
     image: postgres:16-alpine
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-contentfactory}
-      POSTGRES_USER: ${POSTGRES_USER:-cf}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cf} -d ${POSTGRES_DB:-contentfactory}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  # === Redis (shared: n8n + Postiz) ===
   redis:
     image: redis:7-alpine
     volumes:
@@ -26,6 +26,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # === n8n ===
   n8n:
     image: n8nio/n8n:latest
     ports:
@@ -40,8 +41,8 @@ services:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-contentfactory}
-      DB_POSTGRESDB_USER: ${POSTGRES_USER:-cf}
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: postgres
       DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_POSTGRESDB_POOL_SIZE: 3
       EXECUTIONS_DATA_PRUNE: "true"
@@ -54,6 +55,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # === Telegram Bot ===
   telegram-bot:
     build:
       context: ./bot
@@ -61,15 +63,131 @@ services:
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
       N8N_WEBHOOK_URL: http://n8n:5678/webhook
+      POSTIZ_API_URL: http://postiz:5000/api
       ADMIN_IDS: ${ADMIN_IDS:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      BOT_INTERNAL_HOST: 0.0.0.0
-      BOT_INTERNAL_PORT: 8000
     depends_on:
       - n8n
+    restart: unless-stopped
+
+  # === Postiz (social media scheduler) ===
+  postiz:
+    image: ghcr.io/gitroomhq/postiz-app:latest
+    ports:
+      - "4007:5000"
+    volumes:
+      - postiz_config:/config
+      - postiz_uploads:/uploads
+    environment:
+      MAIN_URL: "http://${VPS_IP:-localhost}:4007"
+      FRONTEND_URL: "http://${VPS_IP:-localhost}:4007"
+      NEXT_PUBLIC_BACKEND_URL: "http://${VPS_IP:-localhost}:4007/api"
+      BACKEND_INTERNAL_URL: "http://localhost:3000"
+      JWT_SECRET: ${POSTIZ_JWT_SECRET}
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/postiz?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      TEMPORAL_ADDRESS: "temporal:7233"
+      IS_GENERAL: "true"
+      DISABLE_REGISTRATION: "false"
+      STORAGE_PROVIDER: "local"
+      UPLOAD_DIRECTORY: "/uploads"
+      NEXT_PUBLIC_UPLOAD_DIRECTORY: "/uploads"
+      API_LIMIT: ${POSTIZ_API_LIMIT:-30}
+      X_URL: ""
+      X_API_KEY: ""
+      X_API_SECRET: ""
+      LINKEDIN_CLIENT_ID: ""
+      LINKEDIN_CLIENT_SECRET: ""
+      FACEBOOK_APP_ID: ""
+      FACEBOOK_APP_SECRET: ""
+      TIKTOK_CLIENT_ID: ""
+      TIKTOK_CLIENT_SECRET: ""
+      YOUTUBE_CLIENT_ID: ""
+      YOUTUBE_CLIENT_SECRET: ""
+      PINTEREST_CLIENT_ID: ""
+      PINTEREST_CLIENT_SECRET: ""
+      THREADS_APP_ID: ""
+      THREADS_APP_SECRET: ""
+      REDDIT_CLIENT_ID: ""
+      REDDIT_CLIENT_SECRET: ""
+      DISCORD_CLIENT_ID: ""
+      DISCORD_CLIENT_SECRET: ""
+      DISCORD_BOT_TOKEN_ID: ""
+      SLACK_ID: ""
+      SLACK_SECRET: ""
+      SLACK_SIGNING_SECRET: ""
+      MASTODON_URL: "https://mastodon.social"
+      MASTODON_CLIENT_ID: ""
+      MASTODON_CLIENT_SECRET: ""
+      DRIBBBLE_CLIENT_ID: ""
+      DRIBBBLE_CLIENT_SECRET: ""
+      GITHUB_CLIENT_ID: ""
+      GITHUB_CLIENT_SECRET: ""
+      OPENAI_API_KEY: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+
+  # === Temporal (workflow engine for Postiz) ===
+  temporal-elasticsearch:
+    image: elasticsearch:7.17.27
+    environment:
+      - cluster.routing.allocation.disk.threshold_enabled=true
+      - cluster.routing.allocation.disk.watermark.low=512mb
+      - cluster.routing.allocation.disk.watermark.high=256mb
+      - cluster.routing.allocation.disk.watermark.flood_stage=128mb
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+      - xpack.security.enabled=false
+    volumes:
+      - temporal_es_data:/usr/share/elasticsearch/data
+    restart: unless-stopped
+
+  temporal-postgresql:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_USER: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal_pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  temporal:
+    image: temporalio/auto-setup:1.28.1
+    depends_on:
+      temporal-postgresql:
+        condition: service_healthy
+      temporal-elasticsearch:
+        condition: service_started
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgresql
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      - ENABLE_ES=true
+      - ES_SEEDS=temporal-elasticsearch
+      - ES_VERSION=v7
+      - TEMPORAL_NAMESPACE=default
     restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
   n8n_data:
+  postiz_config:
+  postiz_uploads:
+  temporal_es_data:
+  temporal_pg_data:
