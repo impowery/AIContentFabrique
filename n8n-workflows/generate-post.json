@@ -1,0 +1,95 @@
+{
+  "name": "Generate & Post Content",
+  "nodes": [
+    {
+      "name": "Webhook (receive from bot)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "generate",
+      "path": "generate",
+      "options": {
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "name": "Improve prompt with Groq",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [450, 300],
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer gsk_YOUR_GROQ_KEY" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "options": {},
+        "jsonBody": "{\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a creative copywriter. Improve the user's post idea and return JSON: {\\\"title\\\": ..., \\\"text\\\": ..., \\\"image_prompt\\\": ...}. Make the image_prompt detailed for AI image generation.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.prompt }}\"\n    }\n  ],\n  \"response_format\": { \"type\": \"json_object\" },\n  \"temperature\": 0.7\n}"
+      }
+    },
+    {
+      "name": "Parse Groq response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300],
+      "parameters": {
+        "jsCode": "const content = JSON.parse($json.content);\nconst parsed = JSON.parse(content);\nreturn parsed;"
+      }
+    },
+    {
+      "name": "Generate image with Cloudflare AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 300],
+      "parameters": {
+        "url": "https://api.cloudflare.com/client/v4/accounts/YOUR_CF_ACCOUNT_ID/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer YOUR_CF_API_TOKEN" }
+          ]
+        },
+        "sendBody": true,
+        "jsonBody": "{\n  \"prompt\": \"{{ $json.image_prompt }}\"\n}"
+      }
+    },
+    {
+      "name": "Call back to bot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1050, 300],
+      "parameters": {
+        "url": "{{ $json.body.callback_url }}",
+        "method": "POST",
+        "sendBody": true,
+        "jsonBody": "{\n  \"callback_id\": \"{{ $json.body.callback_id }}\",\n  \"caption\": \"<b>{{ $node['Parse Groq response'].json.title }}</b>\\n\\n{{ $node['Parse Groq response'].json.text }}\",\n  \"image_url\": \"{{ $node['Generate image with Cloudflare AI'].json.result.image }}\"\n}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (receive from bot)": {
+      "main": [[{ "node": "Improve prompt with Groq", "type": "main", "index": 0 }]]
+    },
+    "Improve prompt with Groq": {
+      "main": [[{ "node": "Parse Groq response", "type": "main", "index": 0 }]]
+    },
+    "Parse Groq response": {
+      "main": [[{ "node": "Generate image with Cloudflare AI", "type": "main", "index": 0 }]]
+    },
+    "Generate image with Cloudflare AI": {
+      "main": [[{ "node": "Call back to bot", "type": "main", "index": 0 }]]
+    }
+  }
+}

@@ -1,0 +1,6 @@
+.env
+bot/__pycache__/
+bot/*.pyc
+n8n_data/
+postgres_data/
+redis_data/
